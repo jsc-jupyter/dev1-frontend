@@ -9,6 +9,16 @@
             "show": true,
             "displayName": "Lab Config"
           },
+          "storage": {
+            "show": true,
+            "displayName": "Storage",
+            "dependency": {
+              "system": [
+                "jsccloud",
+                "denbi"
+              ]
+            }
+          },
           "modules": {
             "displayName": "Kernels and Extensions",
             "dependency": {
@@ -81,7 +91,10 @@
                   "options": {
                     "collect": true,
                     "show": true
-                  }
+                  },
+                  "share_system_list": ["JSC-Cloud", "deNBI-Cloud"],
+                  "rtc_system_list": ["JSC-Cloud", "deNBI-Cloud"],
+                  "rtc_option_list": ["custom", "repo2docker", "default"]
                 },
                 "label": {
                   "type": "text",
@@ -90,7 +103,32 @@
                 "trigger": {
                   "init": "homeTriggerSystem",
                   "option": "homeTriggerSystem"
-                }
+                },
+                "triggerOnChange": "homeTriggerSystemChanged"
+              },
+              "rtc": {
+                "input": {
+                  "type": "checkbox",
+                  "options": {
+                    "enabled": true,
+                    "default": false
+                  },
+                },
+                "label": {
+                  "type": "texticonclick",
+                  "icontext": "Real-Time Collaboration disables any access/coupling to HPC systems. <a href='https://jupyterlab-realtime-collaboration.readthedocs.io/' target='_blank'>more</a>",
+                  "value": "Real-Time Collaboration"
+                },
+                "dependency": {
+                  "option": [
+                    "lmod"
+                  ],
+                  "system": [
+                    "jsccloud",
+                    "denbicloud"
+                  ]
+                },
+                "triggerOnChange": "homeTriggerRTCChanged"
               },
               "repo2dockerdirectlink": {
                 "input": {
@@ -409,6 +447,7 @@
                   "value": "Project"
                 },
                 "trigger": {
+                  "system": "homeTriggerProject",
                   "account": "homeTriggerProject"
                 },
                 "dependency": {
@@ -430,6 +469,7 @@
                   "value": "Partition"
                 },
                 "trigger": {
+                  "account": "homeTriggerPartition",
                   "project": "homeTriggerPartition",
                   "system": "homeTriggerPartition"
                 },
@@ -451,6 +491,7 @@
                   "value": "Reservation"
                 },
                 "trigger": {
+                  "account": "homeTriggerReservation",
                   "partition": "homeTriggerReservation",
                   "project": "homeTriggerReservation",
                   "system": "homeTriggerReservation"
@@ -500,7 +541,9 @@
                   "system": [
                     "jsccloud",
                     "mpcdf",
-                    "denbi"
+                    "denbi",
+                    "tudstaging",
+                    "gwdgstaging"
                   ]
                 }
               },
@@ -512,7 +555,8 @@
                   "system": [
                     "jsccloud",
                     "mpcdf",
-                    "denbi"
+                    "denbi",
+                    "tudstaging"
                   ]
                 },            
                 "triggerSuffix": "input-div"
@@ -529,11 +573,41 @@
                   "system": [
                     "jsccloud",
                     "mpcdf",
-                    "denbi"
+                    "denbi",
+                    "tudstaging"
                   ]
                 }
               }
             },
+          },
+          "storage": {
+            "center": {
+              "storagecb": {
+                "input": {
+                  "type": "storagegrow",
+                  "options": {
+                    "group": "storage",
+                    "default": false,
+                    "collect": false,
+                    "show": true
+                  }
+                },
+                "label": {
+                  "type": "text",
+                  "value": "Add external Storage mount"
+                },
+              },
+              "storage1": {
+                "input": {
+                  "type": "storageentry",
+                  "options": {
+                    "show": true,
+                    "collect": true,
+                    "group": "storage"
+                  }
+                }
+              }
+            }
           },
           "modules": {
             "center": {
@@ -551,7 +625,8 @@
                 },
                 "triggerSuffix": "checkboxes-div",
                 "trigger": {
-                  "option": "homeTriggerModules"
+                  "option": "homeTriggerModules",
+                  "system": "homeTriggerModules"
                 },
                 "dependency": {
                   "option": [
@@ -573,7 +648,8 @@
                 },
                 "triggerSuffix": "checkboxes-div",
                 "trigger": {
-                  "option": "homeTriggerModules"
+                  "option": "homeTriggerModules",
+                  "system": "homeTriggerModules"
                 },
                 "dependency": {
                   "option": [
@@ -595,7 +671,8 @@
                 },
                 "triggerSuffix": "checkboxes-div",
                 "trigger": {
-                  "option": "homeTriggerModules"
+                  "option": "homeTriggerModules",
+                  "system": "homeTriggerModules"
                 },
                 "dependency": {
                   "option": [
@@ -734,6 +811,7 @@
                   "options": {
                     "buttons": [
                       "share",
+                      "rtc",
                       "save",
                       "reset",
                       "delete",
@@ -742,12 +820,17 @@
                     "share": {
                       "text": "Share",
                       "trigger": "homeTriggerButtonShare",
-                      "dependency": {
-                        "option": [
-                          "repo2docker",
-                          "custom"
-                        ]
-                      }
+                      "show": false
+                    },
+                    "rtc": {
+                      "text": "RTC",
+                      "trigger": "homeTriggerButtonRTC",
+                      "show": false
+                    },
+                    "rtc": {
+                      "text": "RTC",
+                      "trigger": "homeTriggerButtonRTC",
+                      "show": false
                     },
                     "startgreen": {
                       "text": "Start",
@@ -777,7 +860,7 @@
         "default": {
           "tab": "labconfig",
           "options": {
-            "option": "4.2",
+            "option": "4.3",
             "system": "JUWELS"
           }
         },
