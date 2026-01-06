@@ -927,6 +927,7 @@ require(["jquery", "utils"], function (
     const dataRow = $(`tr.collapsible-tr[data-server-id="${serviceId}-${rowId}"]`);
     const elementId = $this.attr("data-element");
 
+
     logDebug && console.log(`${rowId} - ${elementId} changed ( ${$this.val()} )`);
     $this.trigger("change_select");
     dataRow.find(`[data-trigger-${elementId}][id^='${serviceId}-${rowId}-']`).trigger(`trigger_${elementId}`);
@@ -1813,6 +1814,52 @@ require(["jquery", "utils"], function (
     }
   });
 
+  $(document).on("sse", "[data-sse-credits]", function (event, datalist) {
+    const $this = $(this);
+    if ( $this.attr("data-header-element") === "true" ) {
+      const service = $this.attr("data-service");
+      const row = $this.attr("data-row");
+      const system = $(`[data-service="${service}"][data-row="${row}"][id$='-system-input']`).val();
+
+      for (const data of datalist) {
+        const creditsUserOptions = data?.user_options || {};
+        if ( system && "system" in creditsUserOptions ) {
+          if ( system === creditsUserOptions["system"] ) {
+            var creditsProject = "";
+            if ( data.project ) {
+              creditsProject = ` ( ${data.project.name}: ${data.project.balance} / ${data.project.cap} per day )`;
+            }
+            const creditsText = `Credits: ${data.balance} / ${data.cap} per day ${creditsProject}`;
+            $this.text(`${system} ( ${creditsText} )`);
+          }
+        }
+      }
+    } else {
+      for (const data of datalist) {
+        const creditsUserOptions = data?.user_options || {};
+        const selectCreditsKey = $this.attr("data-sse-credits-key") || false;
+        if (selectCreditsKey && (selectCreditsKey in creditsUserOptions)) {
+          $this.find("option").each(function() {
+            if ( $(this).val() === creditsUserOptions[selectCreditsKey] ) {
+              var creditsProject = "";
+              if ( data.project ) {
+                creditsProject = `( ${data.project.name}: ${data.project.balance} / ${data.project.cap} per day )`;
+              }
+              const creditsText = `Credits: ${data.balance} / ${data.cap} per day ${creditsProject}`;
+              $(this).text(`${$(this).val()} ( ${creditsText} )`);
+            }
+          });
+        } else if (!selectCreditsKey && Object.keys(creditsUserOptions).length === 0 ) {
+            var creditsProject = "";
+            if ( data.project ) {
+              creditsProject = ` ( ${data.project.name}: ${data.project.balance} / ${data.project.cap} )`;
+            }
+            const creditsText = `Global Credits: ${data.balance} / ${data.cap} ${creditsProject}`;
+            $(this).text(`${creditsText}`);
+        }
+      }
+    }
+  });
 
   $(document).on("click", "input[id$='-select-all-input']", function () {
     const $this = $(this);
@@ -2017,12 +2064,12 @@ require(["jquery", "utils"], function (
           }
         }
 
-        const workshopSystems = workshop?.system || [];
-        let workshopProject = workshop?.project || [];
+        const workshopSystems = workshopValues?.system || [];
+        let workshopProject = workshopValues?.project || [];
         if ( !Array.isArray(workshopProject) ){
           workshopProject = [workshopProject];
         }
-        let workshopPartition = workshop?.partition || [];
+        let workshopPartition = workshopValues?.partition || [];
         if ( !Array.isArray(workshopPartition) ){
           workshopPartition = [workshopPartition];
         }
@@ -2155,7 +2202,7 @@ require(["jquery", "utils"], function (
         
         var genericHtml = `
           <div style="width: 80%; margin: auto; margin-top: 20px; margin-bottom: 20px; padding: 20px; border: 1px solid #ccc; border-radius: 10px; background-color: #f9f9f9;">
-            <h2 style="text-align: center; color: #333;">Workshop "${workshop.workshopid}" not available for you.</h2>
+            <h2 style="text-align: center; color: #333;">Workshop "${workshopValues.workshopid}" not available for you.</h2>
             <h4 style="text-align: center; color: #333;">Reason: ${description}</h4>
             <p style="text-align: center; color: #666; font-weight: bold;">Your account is not yet ready to access this workshop. Please complete the steps below to proceed. Contact your workshop instructor or support, if this does not help</p>
             
@@ -2264,6 +2311,18 @@ require(["jquery", "utils"], function (
   }
 
 
+let sseTimeout = null;
+const SSE_TIMEOUT_MS = 40_000;
+
+function resetSSEWatchdog() {
+  if (sseTimeout) {
+    clearTimeout(sseTimeout);
+  }
+  sseTimeout = setTimeout(() => {
+    console.warn("No SSE updates for 40s — reloading page...");
+    location.reload();
+  }, SSE_TIMEOUT_MS);
+}
 
 $(document).on("sse", `[data-sse-progress][id$='-summary-tr']`, function (event, data) {
   if (event.target !== this) {
@@ -2276,6 +2335,8 @@ $(document).on("sse", `[data-sse-progress][id$='-summary-tr']`, function (event,
     const ready = data[rowId]?.ready ?? false;
     const failed = data[rowId]?.failed ?? false;
     const progress = data[rowId]?.progress ?? 10;
+    const spawner = getSpawner(rowId);
+    const pending = spawner.pending;
 
     let status = "starting";
     if ( ready ) status = "connecting";
@@ -2283,6 +2344,10 @@ $(document).on("sse", `[data-sse-progress][id$='-summary-tr']`, function (event,
     else if ( progress == 99 ) status = "cancelling";
     else if ( progress == 0 ) status = "";
     progressBarUpdate(serviceId, rowId, status, progress);
+
+    if ( (pageType() == pageType("start") || pageType() == pageType("spawn") ) && progress >= 85 && progress < 99 ) {
+      resetSSEWatchdog();
+    }
 
     if ( ready ) {
       if ( pageType(null) == pageType("start") || pageType(null) == pageType("spawn") ) {
@@ -2295,9 +2360,15 @@ $(document).on("sse", `[data-sse-progress][id$='-summary-tr']`, function (event,
           $(`button[id^='${serviceId}-${rowId}-'][id$='-btn']`).prop("disabled", false);
       }
     } else if ( failed ) {
+      if (sseTimeout) {
+        clearTimeout(sseTimeout);
+      }
       updateHeaderButtons(serviceId, rowId, "stopped");
       $(`button[id^='${serviceId}-${rowId}-'][id$='-btn']`).prop("disabled", false);
     } else if ( progress == 99 ) {
+      if (sseTimeout) {
+        clearTimeout(sseTimeout);
+      }
       updateHeaderButtons(serviceId, rowId, "cancelling");
       $(`button[id^='${serviceId}-${rowId}-'][id$='-btn']`).prop("disabled", true);
     } else {
@@ -2326,9 +2397,14 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
   const serviceId = $this.attr("data-service");
   const rowId = $this.attr("data-row");
   const stopped = data?.stopped ?? [];
+  const stopping = data?.stopping ?? [];
   if ( stopped.includes(rowId) ){
     progressBarUpdate(serviceId, rowId, "", 0);
     updateHeaderButtons(serviceId, rowId, "stopped");
+  }
+  if ( stopping.includes(rowId) ){
+    progressBarUpdate(serviceId, rowId, "stopping", 100);
+    updateHeaderButtons(serviceId, rowId, "stopping");
   }
 });
 
@@ -2425,13 +2501,18 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
     } else if ( !spawner.active ) {
       $(`[id^='${serviceId}-${rowId}-'][id$='-start-btn-header']`).trigger("click");
     } else {
-      homeHeaderUpdate(serviceId, rowId);
-      if ( serviceId === "jupyterlab" && option === "repo2docker" ) {
-        updateHeaderButtons(serviceId, rowId, "building");
-        progressBarUpdate(serviceId, rowId, "building", 2);
+      if ( spawner.pending === "stop" ) {
+        updateHeaderButtons(serviceId, rowId, "stopping");
+        progressBarUpdate(serviceId, rowId, "stopping", 100);
       } else {
-        updateHeaderButtons(serviceId, rowId, "starting");
-        progressBarUpdate(serviceId, rowId, "starting", 10);
+        homeHeaderUpdate(serviceId, rowId);
+        if ( serviceId === "jupyterlab" && option === "repo2docker" ) {
+          updateHeaderButtons(serviceId, rowId, "building");
+          progressBarUpdate(serviceId, rowId, "building", 2);
+        } else {
+          updateHeaderButtons(serviceId, rowId, "starting");
+          progressBarUpdate(serviceId, rowId, "starting", 10);
+        }
       }
     }
     $(`[id^='${serviceId}-${rowId}-'][id$='-logs-navbar-button']`).trigger("click");
@@ -2527,6 +2608,27 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
       $(`[id^='${serviceId}-${rowId}-'][id$='-btn']:not([id$='-delete-btn']):not([id$='-copy-btn']):not([id$='-rtc-btn'])`).remove();
     }
 
+    const spawner = getSpawner(rowId);
+    for ( const event of spawner.events ) {
+      appendToLog(serviceId, rowId, event);
+    }
+    const optionElement = getInputElement(serviceId, rowId, "option");
+    const option = optionElement.length > 0 && optionElement[0].value;
+    if ( !spawner.ready && spawner.active ) {
+      if ( spawner.pending === "stop" ) {
+        updateHeaderButtons(serviceId, rowId, "stopping");
+        progressBarUpdate(serviceId, rowId, "stopping", 100);
+      } else {
+        homeHeaderUpdate(serviceId, rowId);
+        if ( serviceId === "jupyterlab" && option === "repo2docker" ) {
+          updateHeaderButtons(serviceId, rowId, "building");
+          progressBarUpdate(serviceId, rowId, "building", 2);
+        } else {
+          updateHeaderButtons(serviceId, rowId, "starting");
+          progressBarUpdate(serviceId, rowId, "starting", 10);
+        }
+      }
+    }
   }
 
 
@@ -2737,6 +2839,28 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
         }
       }
     });
+
+    const spawner = getSpawner(rowId);
+    const optionElement = getInputElement(serviceId, rowId, "option");
+    const option = optionElement.length > 0 && optionElement[0].value;
+    for ( const event of spawner.events ) {
+      appendToLog(serviceId, rowId, event);
+    }
+    if ( !spawner.ready && spawner.active ) {
+      if ( spawner.pending === "stop" ) {
+        updateHeaderButtons(serviceId, rowId, "stopping");
+        progressBarUpdate(serviceId, rowId, "stopping", 100);
+      } else {
+        homeHeaderUpdate(serviceId, rowId);
+        if ( serviceId === "jupyterlab" && option === "repo2docker" ) {
+          updateHeaderButtons(serviceId, rowId, "building");
+          progressBarUpdate(serviceId, rowId, "building", 2);
+        } else {
+          updateHeaderButtons(serviceId, rowId, "starting");
+          progressBarUpdate(serviceId, rowId, "starting", 10);
+        }
+      }
+    }
   }
 
 
@@ -3762,23 +3886,42 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
 
 
   function homeHeaderUpdate(serviceId, rowId) {
-    const option = $(`[id^='${serviceId}-${rowId}-'][id$='-option-input']`).val();
-    const system = $(`[id^='${serviceId}-${rowId}-'][id$='-system-input']`).val();
+    var elementsCount = 2;
+    const optionElement = $(`[id^='${serviceId}-${rowId}-'][id$='-option-input']`);
+    const option = optionElement.val();
+    var optionText = option;
+    optionElement.find("option").each(function() {
+      if ( $(this).val() === option ) {
+        optionText = $(this).text();
+      }
+    });
+
+    const systemElement = $(`[id^='${serviceId}-${rowId}-'][id$='-system-input']`);
+    const system = systemElement.val();
+    var systemText = system;
+    systemElement.find("option").each(function() {
+      if ( $(this).val() === system ) {
+        systemText = $(this).text();
+      }
+    });
     const project = $(`[id^='${serviceId}-${rowId}-'][id$='-project-input']`);
     const partition = $(`[id^='${serviceId}-${rowId}-'][id$='-partition-input']`);
 
-    $(`#${serviceId}-${rowId}-config-td-option`).html(`${option}`);
-    $(`#${serviceId}-${rowId}-config-td-system`).html(`${system}`);
+    $(`#${serviceId}-${rowId}-config-td-option`).html(`${optionText}`);
+    $(`#${serviceId}-${rowId}-config-td-system`).html(`${systemText}`);
 
     const nameThElement = $(`#${serviceId}-${rowId}-summary-tr th.name-td`);
     const name = $(`[id^='${serviceId}-${rowId}-'][id$='-name-input']`).val();
     nameThElement.html(name);
 
+    const optionDiv = $(`#${serviceId}-${rowId}-config-td-option-div`);
+    const systemDiv = $(`#${serviceId}-${rowId}-config-td-system-div`);
     const projectDiv = $(`#${serviceId}-${rowId}-config-td-project-div`);
     const partitionDiv = $(`#${serviceId}-${rowId}-config-td-partition-div`);
 
     if ( project.attr("data-collect") === "true" ) {
       projectDiv.show();
+      elementsCount += 1;
       $(`#${serviceId}-${rowId}-config-td-project`).html(`${project.val()}`);
     } else {
       projectDiv.hide();
@@ -3786,6 +3929,7 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
 
     if ( partition.attr("data-collect") === "true" ) {
       partitionDiv.show();
+      elementsCount += 1;
       $(`#${serviceId}-${rowId}-config-td-partition`).html(`${partition.val()}`);
     } else {
       partitionDiv.hide();
@@ -3811,6 +3955,7 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
 
     if ( repotypeShort.attr("data-collect") === "true" ) {
       repotypeDiv.show();
+      elementsCount += 1;
       $(`#${serviceId}-${rowId}-config-td-repotype`).html(`${repotype}`);
     } else {
       repotypeDiv.hide();
@@ -3818,10 +3963,23 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
 
     if ( repourl.attr("data-collect") === "true" ) {
       repourlDiv.show();
+      elementsCount += 1;
       const repourlVal = repourl.val().split("/").filter(Boolean).pop();
       $(`#${serviceId}-${rowId}-config-td-repourl`).html(`${repourlVal}`);
     } else {
       repourlDiv.hide();
+    }
+
+    if ( elementsCount == 2 ) {
+        optionDiv.removeClass("col-lg-3");
+        systemDiv.removeClass("col-lg-3");
+        optionDiv.addClass("col-lg-6");
+        systemDiv.addClass("col-lg-6");
+    } else {
+        optionDiv.removeClass("col-lg-6");
+        systemDiv.removeClass("col-lg-6");
+        optionDiv.addClass("col-lg-3");
+        systemDiv.addClass("col-lg-3");
     }
   }
 
@@ -4002,7 +4160,7 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
     }
     const baseSelector = `button[id^="${serviceId}-${rowId}"][id$="-btn-header"]`;
 
-    if ( summaryTr.attr("data-spawner-type") == "workshop" ) {
+    if ( summaryTr.attr("data-spawner-type") == "workshop" && pageType() == pageType("home") ) {
       toShow.push("manage");
       toShow.push("del");
     }
@@ -4069,20 +4227,6 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
 
   function homeSummaryButtonStop(serviceId, rowId, buttonId, button_options, user, api, base_url, utils) {
     const options = getAPIOptions();
-    options["success"] = function (data, textStatus, jqXHR) {
-      updateHeaderButtons(serviceId, rowId, "stopped");
-      progressBarUpdate(serviceId, rowId, "", 0);
-      appendToLog(serviceId, rowId, getStopEvent(buttonId));
-      if ( pageType(null) != pageType("start") && pageType(null) != pageType("spawn") ) {
-        const navbarLogsButton = $(`[id^='${serviceId}-${rowId}-'][id$='-logs-navbar-button']`);
-        if ( navbarLogsButton.hasClass("active") ) {
-          const navbarLabConfigButton = $(`[id^='${serviceId}-${rowId}-'][id$='-labconfig-navbar-button']`);
-          if ( navbarLabConfigButton ) {
-            navbarLabConfigButton.trigger("click");
-          }
-        }
-      }
-    }
     updateHeaderButtons(serviceId, rowId, "stopping");
     progressBarUpdate(serviceId, rowId, "stopping", 100);
     api.stop_named_server(user, rowId, options);
@@ -4090,20 +4234,6 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
 
   function homeSummaryButtonCancel(serviceId, rowId, buttonId, button_options, user, api, base_url, utils) {
     const options = getAPIOptions();
-    options["success"] = function (data, textStatus, jqXHR) {
-      updateHeaderButtons(serviceId, rowId, "stopped");
-      progressBarUpdate(serviceId, rowId, "", 0);
-      appendToLog(serviceId, rowId, getStopEvent(buttonId));    
-      if ( pageType(null) != pageType("start") && pageType(null) != pageType("spawn") ) {
-        const navbarLogsButton = $(`[id^='${serviceId}-${rowId}-'][id$='-logs-navbar-button']`);
-        if ( navbarLogsButton.hasClass("active") ) {
-          const navbarLabConfigButton = $(`[id^='${serviceId}-${rowId}-'][id$='-labconfig-navbar-button']`);
-          if ( navbarLabConfigButton ) {
-            navbarLabConfigButton.trigger("click");
-          }
-        }
-      }
-    }
     updateHeaderButtons(serviceId, rowId, "cancelling");
     progressBarUpdate(serviceId, rowId, "cancelling", 99);
     api.cancel_named_server(user, rowId, options);
@@ -5088,6 +5218,12 @@ document.addEventListener('DOMContentLoaded', async function () {
 
       if (index > 0 || ["spawn", "start", "workshop"].includes(page)) {
         await fillingRowsRetry(serviceId, rowId, getSpawner(rowId).decrypted_user_options, serviceOptions?.fillingOrder || []);
+        if ( initSSEValues.initialized ) {
+          for (const [key, value] of Object.entries(initSSEValues)) {
+            let payload = Array.isArray(value) ? [value] : value;
+            $(`[data-sse-${key}][data-service=${serviceId}][data-row=${rowId}]`).trigger("sse", payload);
+          }
+        }
         $(`#${serviceId}-${rowId}-summary-tr`).show();
         $(`#${serviceId}-${rowId}-loading-tr`).hide();
         if ( page === "home" ) {
@@ -5105,20 +5241,26 @@ document.addEventListener('DOMContentLoaded', async function () {
             if ( storageStart ) {
               const spawner = getSpawner(rowId);
               const ready = spawner.ready;
+              const pending = spawner.pending;
               const active = spawner.active;
               if ( ready ) {
                 window.open(`/user/${window.jhdata.user}/${rowId}`, "_blank");
               } else if ( !active ) {
                 $(`[id^='${serviceId}-${rowId}-'][id$='-start-btn-header']`).trigger("click");
               } else {
-                $(`[id^='${serviceId}-${rowId}-'][id$='-logs-navbar-button']`).trigger("click");
-                homeHeaderUpdate(serviceId, rowId);
-                if ( serviceId === "jupyterlab" && option === "repo2docker" ) {
-                  updateHeaderButtons(serviceId, rowId, "building");
-                  progressBarUpdate(serviceId, rowId, "building", 2);
+                if ( pending === "stop" ) {
+                  updateHeaderButtons(serviceId, rowId, "stopping");
+                  progressBarUpdate(serviceId, rowId, "stopping", 100);
                 } else {
-                  updateHeaderButtons(serviceId, rowId, "starting");
-                  progressBarUpdate(serviceId, rowId, "starting", 10);
+                  $(`[id^='${serviceId}-${rowId}-'][id$='-logs-navbar-button']`).trigger("click");
+                  homeHeaderUpdate(serviceId, rowId);
+                  if ( serviceId === "jupyterlab" && option === "repo2docker" ) {
+                    updateHeaderButtons(serviceId, rowId, "building");
+                    progressBarUpdate(serviceId, rowId, "building", 2);
+                  } else {
+                    updateHeaderButtons(serviceId, rowId, "starting");
+                    progressBarUpdate(serviceId, rowId, "starting", 10);
+                  }
                 }
               }
             }
