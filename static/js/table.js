@@ -1149,12 +1149,9 @@ require(["jquery", "utils"], function (
     const firstInputElement = $(`[id^='${serviceId}-${rowId}-${tabId}'][id$='-1-${elementId}-input']`);
     const dataType = firstInputElement.attr("data-type");
     const group = firstInputElement.attr("data-group") ?? "default";
-    const name = firstInputElement.attr("name") ?? elementId;
+    const name = countElements;
+
     const type = firstInputElement.attr("type") ?? "text";
-    let pattern = firstInputElement.attr("pattern");
-    if ( !pattern ) {
-      pattern = "";
-    }
     let placeholder = firstInputElement.attr("placeholder");
     if ( !placeholder ) {
       placeholder = "";
@@ -1162,7 +1159,7 @@ require(["jquery", "utils"], function (
 
     const newInputGroup = `
       <div class="input-group" style="display: flex; align-items: center; margin-bottom: 10px;">
-        <input id="${serviceId}-${rowId}-${tabId}-${countElements}-${elementId}-input" type="${type}"
+        <input id="${serviceId}-${rowId}-${tabId}-${countElements}-${elementId}-input"
           class="form-control"
           data-service="${serviceId}"
           data-row="${rowId}"
@@ -1170,11 +1167,12 @@ require(["jquery", "utils"], function (
           data-type="${dataType}"
           data-element="${elementId}"
           data-group="${group}"
-          data-collect="true"
-          data-collect-static
+          data-livecheck="both"
+          data-splitequal="true"
+          data-collect="false"
+          data-collect-static="true"
           name="${name}"
           type="${type}"
-          pattern="${pattern}"
           placeholder="${placeholder}"
         />
         <button data-collect-static data-textgrower-btn-type="del" data-element="${elementId}" data-service="${serviceId}" data-row="${rowId}" data-tab="${tabId}" data-collect="false" type="button" id="${serviceId}-${rowId}-${tabId}-${countElements}-delbtn-${elementId}-input" style="margin-left: 8px;" class="btn btn-danger">${getSvg("delete")}</button>
@@ -1191,7 +1189,16 @@ require(["jquery", "utils"], function (
   document.addEventListener("input", (e) => {
     if (!e.target.matches('input[data-group="envvariables"][data-livecheck="name"]')) return;
 
-    const valid = /^JUPYTER_CUSTOM_[A-Z0-9_]*$/.test(e.target.value);
+    const valid = /^JUPYTER_CUSTOM_[A-Z0-9_]+$/.test(e.target.value);
+
+    e.target.classList.toggle("is-valid", valid);
+    e.target.classList.toggle("is-invalid", !valid);
+  });
+
+  document.addEventListener("input", (e) => {
+    if (!e.target.matches('input[data-group="envvariables"][data-livecheck="both"]')) return;
+
+    const valid = /^JUPYTER_CUSTOM_[A-Z0-9_]+=[\x20-\x7E]+$/.test(e.target.value);
 
     e.target.classList.toggle("is-valid", valid);
     e.target.classList.toggle("is-invalid", !valid);
@@ -1242,7 +1249,7 @@ require(["jquery", "utils"], function (
             data-row="${rowId}"
             data-tab="${tabId}"
             data-type="text"
-            data-collect="true"
+            data-collect="false"
             data-enabled="true"
             data-group="envvariables"
             data-livecheck="name"
@@ -1261,7 +1268,7 @@ require(["jquery", "utils"], function (
             data-row="${rowId}"
             data-tab="${tabId}"
             data-type="text"
-            data-collect="true"
+            data-collect="false"
             data-enabled="true"
             data-group="envvariables"
             data-livecheck="value"
@@ -2403,6 +2410,47 @@ require(["jquery", "utils"], function (
     }
   }
 
+  function validateUserEmailList(textareaElement) {
+    const labelElement = $(`label[for='${textareaElement.attr("id")}']`);
+    const checkBox = labelElement.find("input[type='checkbox']");
+    if ( checkBox.length > 0 && !checkBox.prop("checked") ) {
+      return true;
+    }
+    const textareaValue = textareaElement.val();
+    const lines = textareaValue.split(/\r?\n/);
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    const invalidEmails = [];
+
+    lines.forEach((line, index) => {
+      const value = line.trim();
+
+      // Ignore empty lines and comments
+      if (!value || value.startsWith("#")) return;
+
+      if (!emailRegex.test(value)) {
+        invalidEmails.push({
+          line: index + 1,
+          value
+        });
+      }
+    });
+    if (invalidEmails.length > 0) {
+      textareaElement.addClass('is-invalid');
+      const feedbackElement = textareaElement.siblings('.invalid-feedback');
+      let errorMessage = 'Invalid email addresses found on the following lines:<br>';
+      invalidEmails.forEach(email => {
+        errorMessage += `Line ${email.line}: "${email.value}"<br>`;
+      });
+      feedbackElement.html(errorMessage);
+      feedbackElement.show();
+    } else {
+      textareaElement.removeClass('is-invalid');
+      textareaElement.siblings('.invalid-feedback').hide();
+    }
+    return invalidEmails.length === 0;
+  }
+
   function validateForm(serviceId, rowId) {
     const form = $(`form[id='${serviceId}-${rowId}-form']`);
     let ret = true;
@@ -2414,7 +2462,7 @@ require(["jquery", "utils"], function (
         console.log(`${key} is not allowed. Choose a different name in configuration`);
         valid = false;
       } else {
-        valid = $this.is("input") ? validateInput($this) : $this.is("select") ? validateSelect($this) : false;
+        valid = $this.is("input") ? validateInput($this) : $this.is("select") ? validateSelect($this) : $this.is("textarea") ? validateUserEmailList($this) : false;
       }
       if ( !valid ) {
         console.error("The following element is invalid: ");
@@ -2730,32 +2778,11 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
     // Fill envvariables Tab
     const envvariablesTabId = "envvariables";
 
-    const envvariablesDict = {};
-
-    // Loop through entries
-    for (const [key, value] of Object.entries(user_options.envvariables || {})) {
-      // Skip keys that don't match the pattern <number> or <number>-value
-      const match = key.match(/^(\d+)(-value)?$/);
-      if (match) {
-        const index = match[1];
-        const isValue = !!match[2];
-        if (!envvariablesDict[index]) envvariablesDict[index] = {};
-        if (isValue) {
-          envvariablesDict[index].value = value;
-        } else {
-          envvariablesDict[index].name = value;
-        }
-      }
-    }
-    const orderedEnvVariables = Object.keys(envvariablesDict)
-      .sort((a, b) => a - b)
-      .map(key => envvariablesDict[key]);
-
     // Loop through envvariables
     globalEnvVarsCounter[`${serviceId}-${rowId}`] = 0;
     $(`#${serviceId}-${rowId}-${envvariablesTabId}-table tbody`).empty();
-    for (const env of orderedEnvVariables) {
-      const newRowHtml = createEnvVariablesRow(serviceId, rowId, envvariablesTabId, env.name, env.value);
+    for (const [key, value] of Object.entries(user_options?.envvariables ?? {})) {
+      const newRowHtml = createEnvVariablesRow(serviceId, rowId, envvariablesTabId, key, value);
       $(`#${serviceId}-${rowId}-${envvariablesTabId}-table`).show();
       $(`#${serviceId}-${rowId}-${envvariablesTabId}-table tbody`).append(newRowHtml);
     }
@@ -2812,6 +2839,8 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
     } else if ( dataGroup == "defaultvalues" ) {
       const dataParent = inputElement.attr("data-parent");
       newValue = user_options?.[dataGroup]?.[dataParent] ?? "";
+    } else if ( dataGroup === "envvariables" ) {
+      newValue = user_options?.[dataGroup] ?? "";
     } else {
       newValue = user_options?.[dataGroup]?.[key] ?? "";
     }
@@ -2823,6 +2852,41 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
       } else if (dataType == "checkbox" ) {
         inputElement.prop("checked", true);
         inputElement.trigger("change");
+      } else if (dataType == "textgrower" ) {
+        const firstElement = $(`[id^='${serviceId}-${rowId}-'][id$='-1-${dataGroup}-input']`);
+        Object.entries(newValue).forEach(([key, value], index) => {
+          if ( index > 0 ) {
+            const tabId = firstElement.attr("data-tab");
+            const elementId = firstElement.attr("data-element");
+            const dataType = firstElement.attr("data-type");
+            const group = firstElement.attr("data-group");
+            const type = firstElement.attr("type");
+            const newInputGroup = `
+              <div class="input-group" style="display: flex; align-items: center; margin-bottom: 10px;">
+                <input id="${serviceId}-${rowId}-${tabId}-${index+1}-${elementId}-input"
+                  class="form-control"
+                  data-service="${serviceId}"
+                  data-row="${rowId}"
+                  data-tab="${tabId}"
+                  data-type="${dataType}"
+                  data-element="${elementId}"
+                  data-group="${group}"
+                  data-livecheck="both"
+                  data-splitequal="true"
+                  data-collect="false"
+                  data-collect-static="true"
+                  name="${index+1}"
+                  type="${type}"
+                />
+                <button data-collect-static data-textgrower-btn-type="del" data-element="${elementId}" data-service="${serviceId}" data-row="${rowId}" data-tab="${tabId}" data-collect="false" type="button" id="${serviceId}-${rowId}-${tabId}-${index+1}-delbtn-${elementId}-input" style="margin-left: 8px;" class="btn btn-danger">${getSvg("delete")}</button>
+                <button data-collect-static data-textgrower-btn-type="add" data-element="${elementId}" data-service="${serviceId}" data-row="${rowId}" data-tab="${tabId}" data-collect="false" type="button" id="${serviceId}-${rowId}-${tabId}-${index+1}-addbtn-${elementId}-input" style="margin-left: 8px;" class="btn btn-primary">${getSvg("plus")}</button>
+              </div>
+            `;
+            firstElement.closest('.container').append(newInputGroup);
+          }
+          const textElement = $(`[id^='${serviceId}-${rowId}-'][id$='-${index+1}-${dataGroup}-input']`);
+          textElement.val(`${key}=${value}`);
+        });
       } else {
         inputElement.val(newValue);
         inputElement.trigger("change");
@@ -3001,6 +3065,20 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
       }
     });
 
+    // Fill envvariables Tab
+    const envvariablesTabId = "envvariables";
+
+    // Loop through envvariables
+    globalEnvVarsCounter[`${serviceId}-${rowId}`] = 0;
+    $(`#${serviceId}-${rowId}-${envvariablesTabId}-table tbody`).empty();
+    for (const [key, value] of Object.entries(workshopOptions?.envvariables ?? {})) {
+      const newRowHtml = createEnvVariablesRow(serviceId, rowId, envvariablesTabId, key, value);
+      $(`#${serviceId}-${rowId}-${envvariablesTabId}-table`).show();
+      $(`#${serviceId}-${rowId}-${envvariablesTabId}-table tbody`).append(newRowHtml);
+      $(`[id^='${serviceId}-${rowId}-${envvariablesTabId}-'][id$='-input']`).prop("disabled", true);
+    }
+    $(`[id^='${serviceId}-${rowId}-${envvariablesTabId}-'][id$='-addbtn-input']`).prop("disabled", false);
+
     const spawner = getSpawner(rowId);
     const optionElement = getInputElement(serviceId, rowId, "option");
     const option = optionElement.length > 0 && optionElement[0].value;
@@ -3056,6 +3134,7 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
       let dataGroupValue = $this.attr('data-group');
       let value = "";
       let addValue = true;
+      let splitequal = $this.attr("data-splitequal");
       let id = $this.prop("id");
       let labelInput = $(`#${id}-cb`);
       let parent = $this.attr("data-parent");
@@ -3111,9 +3190,23 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
               ret[dataGroupValue][name] = [];
             }
             // ret[dataGroupValue][name].push($this.attr("name"))
-            ret[dataGroupValue][name].push(value);
+            if ( splitequal == "true" ) {
+              let [k, v] = value.split("=");
+              let index = Object.keys(ret[dataGroupValue]).length / 2 + 1;
+              ret[dataGroupValue][index].push(k);
+              ret[dataGroupValue][`${index}-value`].push(v);
+            } else {
+              ret[dataGroupValue][name].push(value);
+            }
           } else {
-            ret[dataGroupValue][name] = value;
+            if ( splitequal == "true" ) {
+              let [k, v] = value.split("=");
+              let index = Object.keys(ret[dataGroupValue]).length / 2 + 1;
+              ret[dataGroupValue][index] = k;
+              ret[dataGroupValue][`${index}-value`] = v;
+            } else {
+              ret[dataGroupValue][name] = value;
+            }
           }
         }
       }
@@ -3124,18 +3217,68 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
     ret["profile"] = profile;
     ret["service"] = serviceId;
 
+    if ( pageType(null) == pageType("workshopmanager") ) {
+      $(`[id^='${serviceId}-${rowId}-'][id$='-envvariables-input']`).each(function () {
+        const $row = $(this);
+        const fullValue = $row.val();
+        const [key, val] = fullValue.split("=");
+  
+        // Skip empty or invalid keys
+        if (!key) return;
+  
+        if ( !Object.keys(ret).includes("envvariables") ) {
+          ret["envvariables"] = {};
+        }
+        ret['envvariables'][key] = val ?? "";
+      });
+    } else {
+      $(`[id^='${serviceId}-${rowId}-envvariables'][id$='-summary-tr']`).each(function () {
+        const $row = $(this);
+  
+        const $keyInput = $row.find(`[id$='-input']:not([id$='-value-input'])`);
+        const $valInput = $row.find(`[id$='-value-input']`);
+  
+        const key = $keyInput.val();
+        const val = $valInput.val();
+  
+        // Skip empty or invalid keys
+        if (!key) return;
+  
+        if ( !Object.keys(ret).includes("envvariables") ) {
+          ret["envvariables"] = {};
+        }
+        ret['envvariables'][key] = val ?? "";
+      });
+    }
+
+
+
     if ( !Object.keys(ret).includes("name") || !ret?.name ) {
       ret["name"] = `Unnamed ${serviceId}`;
     }
-    const workshopOptions = getWorkshopOptions();
-    if ( !isEmptyObject(workshopOptions) ) {
-      ret["workshop_id"] = workshopOptions?.workshopid;
-    } else if ( !Object.keys(ret).includes("workshop_id")) {
-      ret["workshop_id"] = globalUserOptions?.[serviceId]?.[rowId]?.["workshop_id"] ?? false;
+    if ( !Object.keys(ret).includes("workshop_id")) {
+      const workshopOptions = getWorkshopOptions();
+      if ( !isEmptyObject(workshopOptions) ) {
+        ret["workshop_id"] = workshopOptions?.workshopid;
+      } else if ( !Object.keys(ret).includes("workshop_id")) {
+        ret["workshop_id"] = globalUserOptions?.[serviceId]?.[rowId]?.["workshop_id"] ?? false;
+      }
+    }
+    if ( ret?.workshop_id === undefined && ret?.workshopid != undefined ) {
+      ret["workshop_id"] = ret["workshopid"];
+    }
+    if (typeof ret.workshop_id === "boolean" && ret.workshop_id === false) {
+      delete ret.workshop_id;
     }
     if ( pageType(null) == pageType("workshopmanager") ) {
       ret["description"] = form.find(`[id$='-description-input']`).val();
       ret["expertmode"] = form.find(`[id$='-description-input']`).prop("checked");
+      if ( form.find(`[id$='-userlist-input']`).prop("disabled") === false ) {
+        ret["workshop_storage_rw"] = form.find(`[id$='-workshop_storage_rw-input']`).prop("checked");
+      }
+      if ( form.find(`[id$='-tutorlist-input']`).prop("disabled") === false ) {
+        ret["workshop_tutor_server_access"] = form.find(`[id$='-workshop_tutor_server_access-input']`).prop("checked");
+      }
     }
     const shareId = globalUserOptions?.[serviceId]?.[rowId]?.["share_id"] ?? false;
     if ( shareId ) {
@@ -3157,7 +3300,9 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
         delete ret.resources;
       }
     }
-
+    if (ret && "undefined" in ret) {
+      delete ret["undefined"];
+    }
     console.log("Collected Options in frontend:");
     console.log(ret);
     return ret;
@@ -3173,13 +3318,88 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
   function wmTriggerWorkshopid(trigger, serviceId, rowId, tabId, elementId, elementOptions) {
       const $this = $(`input[id^="${serviceId}-${rowId}-"][id$="-${elementId}-input"]`);
       if ( !isFirstRow(rowId) ){
-        $this.val(rowId);        
-      } else {
-        if ( isWorkshopInstructor() ) {
-          $this.prop("disabled", false);
-          $this.prop("placeholder", elementOptions?.["input"]?.["options"]?.["placeholderInstructor"] || "W");
-        }
+        $this.val(rowId);
+        $this.prop("disabled", true);
       }
+  }
+
+  function wmTriggerStorageRW(trigger, serviceId, rowId, tabId, elementId, elementOptions) {
+    const $this = $(`input[id^="${serviceId}-${rowId}-"][id$="-${elementId}-input"]`);
+    const inputId = $this.attr("id");
+    const label = $(`label[for="${inputId}"]`);
+    const userlist = $(`textarea[id^="${serviceId}-${rowId}-"][id$="-userlist-input"]`);
+    if (userlist.prop("disabled") === false) {
+      $this.prop("disabled", false);
+      $this.attr("data-collect", "true");
+      label.css("color", "black");
+    } else {
+      $this.prop("disabled", true);
+      $this.attr("data-collect", "false");
+      label.css("color", "lightgrey");
+    }
+  }
+
+  function wmTriggerTutorServerAccess(trigger, serviceId, rowId, tabId, elementId, elementOptions) {
+    const $this = $(`input[id^="${serviceId}-${rowId}-"][id$="-${elementId}-input"]`);
+    const inputId = $this.attr("id");
+    const label = $(`label[for="${inputId}"]`);
+    const tutorlist = $(`textarea[id^="${serviceId}-${rowId}-"][id$="-tutorlist-input"]`);
+    if (tutorlist.prop("disabled") === false) {
+      $this.prop("disabled", false);
+      $this.attr("data-collect", "true");
+      label.css("color", "black");
+    } else {
+      $this.prop("disabled", true);
+      $this.attr("data-collect", "false");
+      label.css("color", "lightgrey");
+    }
+  }
+
+  function wmTriggerTutorList(trigger, serviceId, rowId, tabId, elementId, elementOptions) {
+    const $this = $(`[id^="${serviceId}-${rowId}-"][id$="-${elementId}-input"]`);
+    const inputId = $this.attr("id");
+    const label = $(`label[for="${inputId}"]`);
+    const creditsRequestLink = $(`#${serviceId}-${rowId}-${tabId}-creditrequest-link`);
+    const creditsRequestLabel = $(`label[for="${serviceId}-${rowId}-${tabId}-creditrequest-input"]`);
+    const labelCB = $(`[id^="${serviceId}-${rowId}-"][id$="-${elementId}-input-cb"]`);
+    const userlist = $(`textarea[id^="${serviceId}-${rowId}-"][id$="-userlist-input"]`);
+    if (userlist.prop("disabled") === false) {
+      labelCB.prop("disabled", false);
+      label.css("color", "black");
+      creditsRequestLabel.css("color", "black");
+      creditsRequestLink
+        .removeClass("disabled")
+        .css("pointer-events", "auto")
+        .css("opacity", "1")
+        .attr("aria-disabled", "false")
+        .off("click");
+    } else {
+      $this.prop("disabled", true);
+      $this.attr("data-collect", "false");
+      labelCB.prop("disabled", true);
+      labelCB.prop("checked", false);
+      label.css("color", "lightgrey");
+      creditsRequestLabel.css("color", "lightgrey");
+      creditsRequestLink
+        .addClass("disabled")
+        .css("pointer-events", "none")
+        .css("opacity", "0.5")
+        .attr("aria-disabled", "true")
+        .on("click", e => e.preventDefault());
+    }
+  }
+
+  function wmTriggerCreditsRequest(trigger, serviceId, rowId, tabId, elementId, elementOptions) {
+    const label = $(`label[for="${serviceId}-${rowId}-${tabId}-${elementId}-input"]`);
+    console.log(label);
+    console.log(`label[for="${serviceId}-${rowId}-${tabId}-${elementId}-input"]`);
+    c
+    const userlist = $(`textarea[id^="${serviceId}-${rowId}-"][id$="-userlist-input"]`);
+    if (userlist.prop("disabled") === false) {
+      label.css("color", "black");
+    } else {
+      label.css("color", "lightgrey");
+    }
   }
 
   function homeTriggerOption(trigger, serviceId, rowId, tabId, elementId, elementOptions) {
@@ -4197,6 +4417,7 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
     }
     let userOptions = collectSelectedOptions(serviceId, rowId, allCheckboxes=true);
     let workshopData = collectWorkshopOptions(serviceId, rowId);
+    const workshopIDElement = $(`input[id^='${serviceId}-${rowId}-'][id$='-workshopid-input']`);
 
     options["data"] = JSON.stringify({
       ...userOptions,
@@ -4208,7 +4429,27 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
         $('#rowid-reload').val(resp);
         showModal(serviceId, rowId, url, "Share Workshop", "Share your workshop via URL", url);
       }
+      workshopIDElement.removeClass('is-invalid');
+      workshopIDElement.siblings('.invalid-feedback').hide();
     };
+    options["error"] = function (jqXHR, textStatus, errorThrown) {
+      console.log(jqXHR.responseJSON);
+      if (jqXHR.status == 400) {
+        const resp = jqXHR.responseJSON;
+        workshopIDElement.addClass('is-invalid');
+        const feedbackElement = workshopIDElement.siblings('.invalid-feedback');
+        let error_message = "Could not create workshop:<br><ul>";
+        for (const [key, value] of Object.entries(resp)) {
+          error_message += `<li><strong>${key}:</strong> ${value}</li>`;
+        }
+        error_message += "</ul>";
+        feedbackElement.show();
+        feedbackElement.html(error_message);
+        return;
+      }
+      showToast("Request to Server failed. Try refreshing website");
+      console.error("API Request failed:", textStatus, errorThrown);
+    }
     options["type"] = "POST";
 
     api.api_request(
@@ -4268,6 +4509,48 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
       url,
       options
     );
+  }
+
+  function buildHumanReadableQuery(serviceId, rowId, payload) {
+    const params = new URLSearchParams();
+
+    function addValue(key, value) {
+      if (value === undefined || value === null) return;
+
+      if (Array.isArray(value)) {
+        value.forEach(v => addValue(key, v));
+      } else if (typeof value === "object") {
+        Object.entries(value).forEach(([k, v]) => {
+          addValue(`${key}.${k}`, v);
+        });
+      } else {
+        params.append(key, String(value));
+      }
+    }
+
+    Object.entries(payload).forEach(([key, value]) => {
+      // Skip empty arrays
+      if (Array.isArray(value) && value.length === 0) return;
+
+      // Skip empty objects
+      if (
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        Object.keys(value).length === 0
+      ) {
+        return;
+      }
+      addValue(key, value);
+    });
+    return params.toString();
+  }
+
+
+  function homeTriggerButtonGetLink(serviceId, rowId, buttonId, button_options, user, api, base_url, utils) {
+    const userOptions = collectSelectedOptions(serviceId, rowId);
+    const query = buildHumanReadableQuery(serviceId, rowId, userOptions);
+    const start_url = new URL(utils.url_path_join(window.origin, base_url, "api", "start").replace("//", "/"));
+    showModal(serviceId, rowId, `${start_url}?${query}`, `Direct Link`, "Configure your server via direct link. Click \"Copy URL\" to copy the URL to your clipboard.", "");
   }
 
   function wmTriggerButtonShare(serviceId, rowId, buttonId, button_options, user, api, base_url, utils) {

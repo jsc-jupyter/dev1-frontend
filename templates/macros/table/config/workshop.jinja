@@ -76,11 +76,6 @@
                   "init": "wTriggerOption"
                 }
               },
-              "hr1": {
-                "input": {
-                  "type": "hr"
-                }
-              },
               "system": {
                 "input": {
                   "type": "select",
@@ -97,6 +92,11 @@
                 "trigger": {
                   "init": "wTriggerSystem",
                   "option": "wTriggerSystem"
+                }
+              },
+              "hr1": {
+                "input": {
+                  "type": "hr"
                 }
               },
               "repo2dockerdirectlink": {
@@ -566,7 +566,8 @@
                   "type": "envvariablesentry",
                   "options": {
                     "show": true,
-                    "collect": true,
+                    "collect": false,
+                    "collectstatic": true,
                     "group": "envvariables"
                   }
                 }
@@ -575,6 +576,34 @@
           },
           "modules": {
             "center": {
+              "communities": {
+                "input": {
+                  "type": "multiple_checkboxes"
+                },
+                "options": {
+                  "group": "modules",
+                  "setName": "communitySet"
+                },
+                "label": {
+                  "type": "header",
+                  "value": "Communities"
+                },
+                "triggerSuffix": "checkboxes-div",
+                "trigger": {
+                  "option": "wTriggerModules",
+                  "system": "wTriggerModules"
+                },
+                "dependency": {
+                  "option": [
+                    "lmod"
+                  ]
+                }
+              },
+              "moduleshr": {
+                "input": {
+                  "type": "hr"
+                }
+              },
               "extensions": {
                 "input": {
                   "type": "multiple_checkboxes"
@@ -589,7 +618,8 @@
                 },
                 "triggerSuffix": "checkboxes-div",
                 "trigger": {
-                  "option": "wTriggerModules"
+                  "option": "wTriggerModules",
+                  "system": "wTriggerModules"
                 },
                 "dependency": {
                   "option": [
@@ -611,7 +641,8 @@
                 },
                 "triggerSuffix": "checkboxes-div",
                 "trigger": {
-                  "option": "wTriggerModules"
+                  "option": "wTriggerModules",
+                  "system": "wTriggerModules"
                 },
                 "dependency": {
                   "option": [
@@ -633,7 +664,8 @@
                 },
                 "triggerSuffix": "checkboxes-div",
                 "trigger": {
-                  "option": "wTriggerModules"
+                  "option": "wTriggerModules",
+                  "system": "wTriggerModules"
                 },
                 "dependency": {
                   "option": [
@@ -776,7 +808,7 @@
         "default": {
           "tab": "labconfig",
           "options": {
-            "option": "4.2",
+            "option": "4.3",
             "system": "JUWELS"
           }
         },
