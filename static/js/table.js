@@ -19,7 +19,7 @@ require(["jquery", "utils"], function (
     // const originalIcon = $this.find(".copy-icon").html();
     const shareId = globalUserOptions[serviceId][rowId].share_id;
     let tooltipInstance = bootstrap.Tooltip.getInstance($this);
-    let url = utils.url_path_join(window.origin, "share", shareId).replace("//", "/");
+    let url = new URL(`share/${shareId}`, window.origin).toString();
 
     navigator.clipboard.writeText(url).then(() => {
       $this.html(getSvg("check"));
@@ -41,7 +41,7 @@ require(["jquery", "utils"], function (
     // const originalIcon = $this.find(".copy-icon").html();
     const workshopId = globalUserOptions[serviceId][rowId].workshop_id;
     let tooltipInstance = bootstrap.Tooltip.getInstance($this);
-    let url = utils.url_path_join(window.origin, "workshops", workshopId).replace("//", "/");
+    let url = new URL(`workshops/${workshopId}`, window.origin).toString();
 
     navigator.clipboard.writeText(url).then(() => {
       $this.html(getSvg("check"));
@@ -597,7 +597,7 @@ require(["jquery", "utils"], function (
               ...unicoreReservations[system].filter(reservation => {
                 const partitionMatches = (reservation.PartitionName === "" || reservation.PartitionName === partition || partition === "_all_");
                 const usersMatch = (reservation.Users === "" || reservation.Users.split(",").includes(account) || account === "_all_");
-                const accountsMatch = (reservation.Accounts === "" || reservation.Accounts === project || project === "_all_");
+                const accountsMatch = (reservation.Accounts === "" || reservation.Accounts.split(",").includes(project) || project === "_all_");
                 return partitionMatches && usersMatch && accountsMatch;
               })
             );
@@ -842,19 +842,6 @@ require(["jquery", "utils"], function (
     if (group && userInput) {
       const $urlInput = $(`input[name="url"][data-group="${group}"]`);
       $urlInput.val(`https://b2drop.eudat.eu/remote.php/dav/files/${userInput}/`);
-    }
-  });
-
-  $(document).on('click', '.data-mount-passwd-btn', function () {
-    const $this = $(this);
-    const input = $this.closest('.input-group').find('input[type="password"], input[type="text"]');
-
-    if (input.attr('type') === 'password') {
-      input.attr('type', 'text');
-      $this.find('i').removeClass('fa-eye').addClass('fa-eye-slash');
-    } else {
-      input.attr('type', 'password');
-      $this.find('i').removeClass('fa-eye-slash').addClass('fa-eye');
     }
   });
 
@@ -2467,6 +2454,12 @@ require(["jquery", "utils"], function (
       if ( !valid ) {
         console.error("The following element is invalid: ");
         console.log($this);
+        // If row is collapsed expand it so user can see the wrong/missing input
+        const collapse = $(`.collapse[id^='${serviceId}-${rowId}-collapse']`);
+        if (!collapse.hasClass("show")) {
+          const summaryRow = document.getElementById(`${serviceId}-${rowId}-summary-tr`);
+          summaryRow.click();
+        }
         // If the user is looking at a different tab, we should highlight the button in the navbar
         const buttonDiv = $(`#${serviceId}-${rowId}-tab-button-div`);
         const activeTab = buttonDiv.find('.active').attr('name');
@@ -2486,7 +2479,7 @@ require(["jquery", "utils"], function (
 
 
 let sseTimeout = null;
-const SSE_TIMEOUT_MS = 40_000;
+const SSE_TIMEOUT_MS = 80_000;
 
 function resetSSEWatchdog() {
   if (sseTimeout) {
@@ -2756,7 +2749,7 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
       templateInput.trigger("change");
       
       $collapseRow.find('[name="path"]').val(row.path || '');
-      $collapseRow.find('[name="readonly"]').prop("checked", row.readonly === true);
+      $collapseRow.find('[name="readonly"]').prop("checked", row.readonly === true || row.readonly === "readonly");
 
       // Set attributes inside the template-specific container
       const $templateContainer = $collapseRow.find(`div[data-storage-template="${row.template}"]`);
@@ -3148,8 +3141,11 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
           addValue = false;
         } else {
           if ( $this.is("input[type='checkbox']") ){
-            // value = $this.prop('checked');
-            value = $this.attr("name");
+            if ( dataGroupValue === "modules" ) {
+              value = $this.attr("name");
+            } else {
+              value = $this.prop('checked');
+            }
             if ( allCheckboxes && !parent ) {
               addValue = true;
             } else if ( parent && $this.prop('checked') ) {
@@ -4425,7 +4421,7 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
     });
     options["success"] = function (resp) {
       if ( show_modal ) {
-        let url = new URL(utils.url_path_join(window.origin, "workshops", resp).replace("//", "/"));
+        let url = new URL(`workshops/${resp}`, window.origin).toString();
         $('#rowid-reload').val(resp);
         showModal(serviceId, rowId, url, "Share Workshop", "Share your workshop via URL", url);
       }
@@ -5767,6 +5763,12 @@ document.addEventListener('DOMContentLoaded', async function () {
         const [rowId, rowOptions] = rows[index];
         await f(serviceId, serviceOptions, rowId, rowOptions, index + 1);
         await new Promise(r => setTimeout(r, 0)); 
+      }
+      
+      // If there are no rows and it's the home or workshopmanager
+      // Toggle click of empty row to expand it
+      if (["home", "workshopmanager"].includes(page) && rows.length === 0 ) {
+        document.getElementById(`${serviceId}-${getFirstRowId()}-summary-tr`).click();
       }
     }
   });
