@@ -119,7 +119,16 @@ require(["jquery", "utils"], function (
     });
   }
 
+  function _getDockerSystems() {
+    return Object.keys(systemConfig).filter(system => {
+      const backendService = systemConfig[system].backendService;
+      // Check if the backend service type is "kube"
+      return backendServicesConfig[backendService]?.type === "docker";
+    });
+  }
+
   const kubeSystems = _getKubeSystems();
+  const dockerSystems = _getDockerSystems();
 
   function _getKubeFlavorSystems() {
     return Object.keys(systemConfig).filter(system => {
@@ -692,7 +701,7 @@ require(["jquery", "utils"], function (
     }
     function _getAllSystems() {
       // Combine both lists and remove duplicates using a Set
-      let allSystems = [...new Set([...unicoreSystems, ...kubeSystems])];
+      let allSystems = [...new Set([...unicoreSystems, ...kubeSystems, ...dockerSystems])];
 
 
       if (pageType(null) == pageType("workshop")) {
@@ -1107,6 +1116,25 @@ require(["jquery", "utils"], function (
     $(`#${serviceId}-${rowId}-modal .modal-body p`).html(`${text1}`);
     $(`#${serviceId}-${rowId}-modal`).modal('show');
   }
+ 
+  window.showJupyterAIModal = function (serviceId, rowId) {
+    $(`#${serviceId}-${rowId}-jupyterai-modal`).modal('show');
+  }
+
+  $(document).on("click", `input[id$='-modules-extensions-jupyterai-input']`, function() {
+    const $this = $(this);
+    const isChecked = $this.prop("checked");
+    const serviceId = $this.data("service");
+    const rowId = $this.data("row");
+    if (isChecked) {
+      showJupyterAIModal("jupyterlab", rowId);
+    }
+  });
+
+  $(document).on("click", `[id$='-jupyterai-modal-close-btn']`, function() {
+    const jupyteraimodalId = $(this).attr("id").split("-close-btn")[0];
+    $(`#${jupyteraimodalId}`).modal("hide");
+  });
 
   $(document).on("click", `button[id$='-view-password']`, function (event) {
     const $this = $(this);
@@ -2174,7 +2202,7 @@ require(["jquery", "utils"], function (
         const elementName = element.attr("data-element");
         const defaultValues = workshopValues?.defaultvalues ?? {};
         const workshopId = workshopValues?.workshopid ?? "noworkshopid";
-        const allowedSystems = workshopValues?.system || false;
+        let allowedSystems = workshopValues?.system || false;
         
         if ( !description ) {
           if ( Object.keys(defaultValues).includes(elementName) ) {
@@ -2319,22 +2347,44 @@ require(["jquery", "utils"], function (
             </details>
           `
         
-        
-        var genericHtml = `
-          <div style="width: 80%; margin: auto; margin-top: 20px; margin-bottom: 20px; padding: 20px; border: 1px solid #ccc; border-radius: 10px; background-color: #f9f9f9;">
-            <h2 style="text-align: center; color: #333;">Workshop "${workshopValues.workshopid}" not available for you.</h2>
-            <h4 style="text-align: center; color: #333;">Reason: ${description}</h4>
-            <p style="text-align: center; color: #666; font-weight: bold;">Your account is not yet ready to access this workshop. Please complete the steps below to proceed. Contact your workshop instructor or support, if this does not help</p>
-            
-            <div style="margin-top: 20px;">
-                ${stepLogin}
-                ${stepProject}
-                ${stepSystem}
-                ${stepPartition}
+        let systemAvailable = true;
+        let genericHtml = "";
+        if ( allowedSystems ) {
+          if ( !Array.isArray(allowedSystems) ){
+            allowedSystems = [allowedSystems];
+          }
+          systemAvailable = false;
+          for ( system of allowedSystems ) {
+            if ( ! system in globalMaintenanceSystems ) {
+              systemAvailable = true;
+            }
+          }
+        }
+
+        if ( !systemAvailable ) {
+          genericHtml = `
+            <div style="width: 80%; margin: auto; margin-top: 20px; margin-bottom: 20px; padding: 20px; border: 1px solid #ccc; border-radius: 10px; background-color: #f9f9f9;">
+            <h2 style="text-align: center; color: #333;">Workshop "${workshopValues.workshopid}" not available. System ${allowedSystems} is currently unavailable.</h2>
+              <h4 style="text-align: center; color: #333;">Check JSC-Status Page for more information: <a href="https://status.jsc.fz-juelich.de" target="_blank">JSC Status Page</a></h4>
             </div>
-            <p style="text-align: center; color: darkorange;">It may take up to 60 minutes for the systems to fully process account updates. Any start attempts during this time might fail.</p>
-        </div>
-        `
+          `
+        } else {
+          genericHtml = `
+            <div style="width: 80%; margin: auto; margin-top: 20px; margin-bottom: 20px; padding: 20px; border: 1px solid #ccc; border-radius: 10px; background-color: #f9f9f9;">
+            <h2 style="text-align: center; color: #333;">Workshop "${workshopValues.workshopid}" not available for you.</h2>
+              <h4 style="text-align: center; color: #333;">Reason: ${description}</h4>
+              <p style="text-align: center; color: #666; font-weight: bold;">Your account is not yet ready to access this workshop. Please complete the steps below to proceed. Contact your workshop instructor or support, if this does not help</p>
+              
+              <div style="margin-top: 20px;">
+                  ${stepLogin}
+                  ${stepProject}
+                  ${stepSystem}
+                  ${stepPartition}
+                  </div>
+                  <p style="text-align: center; color: darkorange;">It may take up to 60 minutes for the systems to fully process account updates. Any start attempts during this time might fail.</p>
+            </div>
+          `
+        }
         helpDiv.append(genericHtml);
         $(`#global-content-div`).hide();
       }
@@ -4107,6 +4157,18 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
     }
   }
 
+  function homeTriggerRepoPathTypeInit(trigger, serviceId, rowId, tabId, elementId, elementOptions) {
+    if ( pageType(null) == pageType("workshop") ) {
+      const workshopValues = getWorkshopOptions();
+      const repoTypeInput = getInputElement(serviceId, rowId, "repopathtype");
+      const group = repoTypeInput.attr('data-group');
+      const workshopRepoType = workshopValues?.[group]?.repopathtype || false;
+      if ( workshopRepoType ) {
+        repoTypeInput.val(workshopRepoType);
+        repoTypeInput.prop("disabled", true);
+      }
+    }
+  }
 
   function homeTriggerRepoPathType(trigger, serviceId, rowId, tabId, elementId, elementOptions) {
     const repoPathChecked = val(getLabelCBElement(serviceId, rowId, "repopath"));
@@ -4182,7 +4244,16 @@ $(document).on("sse", `[data-sse-servers][id$='-summary-tr']`, function (event, 
   }
 
   function homeTriggerRepoTypeChanged(trigger, serviceId, rowId, tabId, elementId, elementOptions) {
-    // not needed right now 
+    if ( pageType(null) == pageType("workshop") ) {
+      const workshopValues = getWorkshopOptions();
+      const repoTypeInput = getInputElement(serviceId, rowId, "repotype");
+      const group = repoTypeInput.attr('data-group');
+      const workshopRepoType = workshopValues?.[group]?.repotype || false;
+      if ( workshopRepoType ) {
+        repoTypeInput.val(workshopRepoType);
+        repoTypeInput.prop("disabled", true);
+      }
+    }
   }
 
   function wmTriggerExpertMode(trigger, serviceId, rowId, tabId, elementId, elementOptions) {
@@ -5681,7 +5752,7 @@ document.addEventListener('DOMContentLoaded', async function () {
       $(`#${serviceId}-loading-tr`).hide();
       await new Promise(r => setTimeout(r, 0));
       await triggerInitUntilValuesSet(serviceId, rowId, index===0);
-      
+
       await new Promise(r => setTimeout(r, 0));
       
 
